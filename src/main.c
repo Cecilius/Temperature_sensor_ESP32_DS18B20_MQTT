@@ -16,6 +16,7 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "esp_sleep.h"
+#include "esp_rom_crc.h"
 
 #include "lwip/err.h"
 #include "lwip/sys.h"
@@ -24,7 +25,9 @@
 #include "owb_rmt.h"
 #include "ds18b20.h"
 
+static const char *TAG = "wifi station + ds18b20";
 #include "secrets.h"
+#include "MQTT.h"
 
 #define GPIO_DS18B20_0       (4)
 #define MAX_DEVICES          (8)
@@ -49,7 +52,10 @@ static EventGroupHandle_t s_wifi_event_group;
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 
-static const char *TAG = "wifi station + ds18b20";
+RTC_DATA_ATTR   uint32_t crc32 = 0;
+RTC_DATA_ATTR   uint8_t channel = 0;
+RTC_DATA_ATTR   uint8_t bssid[6] = {0,0,0,0,0,0};
+RTC_DATA_ATTR   uint8_t padding = 0;
 
 static int s_retry_num = 0;
 
@@ -78,6 +84,17 @@ static void event_handler(void* arg, esp_event_base_t event_base,
 void wifi_init_sta(void)
 {
     s_wifi_event_group = xEventGroupCreate();
+
+    // WiFi Persistent
+    esp_wifi_set_storage(WIFI_STORAGE_RAM);
+
+    // Try to read WiFi settings from RTC memory
+    bool rtcValid = false;
+    // Calculate the CRC of what we just read from RTC memory, but skip the first 4 bytes as that's the checksum itself.
+    uint32_t crc = esp_rom_crc32_le( 0, ((uint8_t*)&bssid), sizeof( bssid ) );
+    if( crc == crc32 ) {
+        rtcValid = true;
+    }
 
     ESP_ERROR_CHECK(esp_netif_init());
 
@@ -108,15 +125,14 @@ void wifi_init_sta(void)
                                                         &event_handler,
                                                         NULL,
                                                         &instance_got_ip));
-
     wifi_config_t wifi_config = {
         .sta = {
             .ssid = EXAMPLE_ESP_WIFI_SSID,
             .password = EXAMPLE_ESP_WIFI_PASS,
             /* Setting a password implies station will connect to all security modes including WEP/WPA.
-             * However these modes are deprecated and not advisable to be used. Incase your Access point
-             * doesn't support WPA2, these mode can be enabled by commenting below line */
-	     .threshold.authmode = WIFI_AUTH_WPA2_PSK,
+            * However these modes are deprecated and not advisable to be used. Incase your Access point
+            * doesn't support WPA2, these mode can be enabled by commenting below line */
+        .threshold.authmode = WIFI_AUTH_WPA2_PSK,
 
             .pmf_cfg = {
                 .capable = true,
@@ -124,6 +140,13 @@ void wifi_init_sta(void)
             },
         },
     };
+/*
+    if(rtcValid){
+        wifi_config.sta.bssid = bssid;
+        wifi_config.sta.channel = channel;
+        wifi_config.sta.bssid_set = true;
+    }
+*/
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
     ESP_ERROR_CHECK(esp_wifi_start() );
@@ -158,7 +181,8 @@ void wifi_init_sta(void)
 
 void app_main(void)
 {
-    const int wakeup_time_sec = 10;
+    float temperature = 0;
+    const int wakeup_time_sec = 300;
     printf("Enabling timer wakeup, %ds\n", wakeup_time_sec);
     esp_sleep_enable_timer_wakeup(wakeup_time_sec * 1000000);
     
@@ -172,8 +196,8 @@ void app_main(void)
 
     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
 
-    // Wait a little
-//    vTaskDelay(5000.0 / portTICK_PERIOD_MS);
+    // Turn on WiFi
+    wifi_init_sta();
 
     // Create a 1-Wire bus, using the RMT timeslot driver
     OneWireBus * owb;
@@ -224,9 +248,7 @@ void app_main(void)
     int sample_count = 0;
     if (num_devices > 0)
     {
-        TickType_t last_wake_time = xTaskGetTickCount();
-
-        for ( int tmp = 0; tmp < 10; ++tmp)
+        for ( int tmp = 0; tmp < 1; ++tmp)
         {
             ds18b20_convert_all(owb);
 
@@ -255,8 +277,9 @@ void app_main(void)
 
                 printf("  %d: %.1f    %d errors\n", i, readings[i], errors_count[i]);
             }
+            temperature = readings[0];
 
-            vTaskDelayUntil(&last_wake_time, SAMPLE_PERIOD / portTICK_PERIOD_MS);
+//            vTaskDelayUntil(&last_wake_time, SAMPLE_PERIOD / portTICK_PERIOD_MS);
         }
     }
     else
@@ -272,12 +295,14 @@ void app_main(void)
     owb_uninitialize(owb);
 
     fflush(stdout);
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-    
-    wifi_init_sta();
 
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-
+    //Send MQTT
+    char message[7];
+    char topic[50];
+    sprintf(message, "%.1f", temperature);
+    sprintf(topic, "Temperature-monitors/Testing");
+    send_MQTT(topic, message);
+ 
     printf("Turning off WiFi\n");
     
     ESP_ERROR_CHECK(esp_wifi_stop());
