@@ -15,6 +15,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "esp_sleep.h"
 
 #include "lwip/err.h"
 #include "lwip/sys.h"
@@ -157,6 +158,10 @@ void wifi_init_sta(void)
 
 void app_main(void)
 {
+    const int wakeup_time_sec = 10;
+    printf("Enabling timer wakeup, %ds\n", wakeup_time_sec);
+    esp_sleep_enable_timer_wakeup(wakeup_time_sec * 1000000);
+    
     //Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -267,7 +272,17 @@ void app_main(void)
     owb_uninitialize(owb);
 
     fflush(stdout);
-    vTaskDelay(5000 / portTICK_PERIOD_MS);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
     
     wifi_init_sta();
+
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+    printf("Turning off WiFi\n");
+    
+    ESP_ERROR_CHECK(esp_wifi_stop());
+
+    printf("Entering deep sleep\n");
+
+    esp_deep_sleep_start();
 }
