@@ -24,6 +24,8 @@
 
 bool message_sent = false;
 
+esp_mqtt_client_handle_t client;
+
 static void log_error_if_nonzero(const char *message, int error_code)
 {
     if (error_code != 0) {
@@ -134,7 +136,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     }
 }
 
-void send_MQTT(const char *topic, const char *message)
+void start_MQTT()
 {
     ESP_LOGI(TAG, "[MQTT] Startup..");
 
@@ -153,10 +155,14 @@ void send_MQTT(const char *topic, const char *message)
         .client_id = MY_SECRET_MQTT_CLIENT_ID
     };
 
-    esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
+    client = esp_mqtt_client_init(&mqtt_cfg);
     /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler */
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
     esp_mqtt_client_start(client);
+}
+
+void send_MQTT(const char *topic, const char *message)
+{
     message_sent = false;
     int retries = 0;
     esp_mqtt_client_publish(client, topic, message, 0, 1, 1);
@@ -165,6 +171,10 @@ void send_MQTT(const char *topic, const char *message)
         vTaskDelay(100 / portTICK_PERIOD_MS);
         retries++;
     }
-    printf("retries = %d /n", retries);
+    printf("retries = %d \n", retries);
+}
+
+void end_MQTT()
+{
     esp_mqtt_client_destroy(client);
 }
