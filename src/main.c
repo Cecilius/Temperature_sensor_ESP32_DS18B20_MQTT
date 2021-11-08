@@ -1,11 +1,5 @@
-/* WiFi station Example
+// main.c
 
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
-
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
-*/
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -25,7 +19,7 @@
 #include "owb_rmt.h"
 #include "ds18b20.h"
 
-static const char *TAG = "wifi station + ds18b20";
+static const char *TAG = "wifi + ds18b20";
 #include "secrets.h"
 #include "MQTT.h"
 
@@ -34,14 +28,10 @@ static const char *TAG = "wifi station + ds18b20";
 #define DS18B20_RESOLUTION   (DS18B20_RESOLUTION_12_BIT)
 #define SAMPLE_PERIOD        (1000)   // milliseconds
 
-/* The examples use WiFi configuration that you can set via project configuration menu
+// How many times will try to connect WiFi
+#define CONECTION_RETRY  5
 
-   If you'd rather not, just change the below entries to strings with
-   the config you want - ie #define EXAMPLE_WIFI_SSID "mywifissid"
-*/
-#define EXAMPLE_ESP_WIFI_SSID      MY_SECRET_SSID
-#define EXAMPLE_ESP_WIFI_PASS      MY_SECRET_PASS
-#define EXAMPLE_ESP_MAXIMUM_RETRY  5
+static struct timeval app_start;
 
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t s_wifi_event_group;
@@ -65,7 +55,7 @@ static void event_handler(void* arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_retry_num < EXAMPLE_ESP_MAXIMUM_RETRY) {
+        if (s_retry_num < CONECTION_RETRY) {
             esp_wifi_connect();
             s_retry_num++;
             ESP_LOGI(TAG, "retry to connect to the AP");
@@ -88,9 +78,9 @@ void wifi_init_sta(void)
     // WiFi Persistent
     esp_wifi_set_storage(WIFI_STORAGE_RAM);
 
-    // Try to read WiFi settings from RTC memory
+    // validate WiFi settings from RTC memory
     bool rtcValid = false;
-    // Calculate the CRC of what we just read from RTC memory, but skip the first 4 bytes as that's the checksum itself.
+    // Calculate the CRC of bssid from RTC memory
     uint32_t crc = esp_rom_crc32_le( 0, ((uint8_t*)&bssid), sizeof( bssid ) );
     if( crc == crc32 ) {
         rtcValid = true;
@@ -105,9 +95,14 @@ void wifi_init_sta(void)
     esp_netif_ip_info_t ip_info;
 
     IP4_ADDR(&ip_info.ip, 192, 168, 100, 210);
-   	IP4_ADDR(&ip_info.gw, 192, 168, 100, 1);
    	IP4_ADDR(&ip_info.netmask, 255, 255, 255, 0);
+   	IP4_ADDR(&ip_info.gw, 192, 168, 100, 1);
 
+/*
+    ip4addr_aton("192.168.100.210", &ip_info.ip);
+    ip4addr_aton("255.255.255.0", &ip_info.netmask);
+    ip4addr_aton("192.168.100.1", &ip_info.gw);
+*/
     esp_netif_set_ip_info(my_sta, &ip_info);
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -127,13 +122,12 @@ void wifi_init_sta(void)
                                                         &instance_got_ip));
     wifi_config_t wifi_config = {
         .sta = {
-            .ssid = EXAMPLE_ESP_WIFI_SSID,
-            .password = EXAMPLE_ESP_WIFI_PASS,
+            .ssid = MY_SECRET_SSID,
+            .password = MY_SECRET_PASS,
             /* Setting a password implies station will connect to all security modes including WEP/WPA.
             * However these modes are deprecated and not advisable to be used. Incase your Access point
             * doesn't support WPA2, these mode can be enabled by commenting below line */
-        .threshold.authmode = WIFI_AUTH_WPA2_PSK,
-
+			.threshold.authmode = WIFI_AUTH_WPA2_PSK,
             .pmf_cfg = {
                 .capable = true,
                 .required = false
@@ -141,10 +135,12 @@ void wifi_init_sta(void)
         },
     };
 /*
+	// Need cleaning
     if(rtcValid){
         wifi_config.sta.bssid = bssid;
         wifi_config.sta.channel = channel;
-        wifi_config.sta.bssid_set = true;
+		wifi_config.sta.bssid_set = 1;
+		wifi_config.sta.scan_method = WIFI_FAST_SCAN;
     }
 */
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
@@ -165,10 +161,10 @@ void wifi_init_sta(void)
      * happened. */
     if (bits & WIFI_CONNECTED_BIT) {
         ESP_LOGI(TAG, "connected to ap SSID:%s password:%s",
-                 EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
+                 MY_SECRET_SSID, MY_SECRET_PASS);
     } else if (bits & WIFI_FAIL_BIT) {
         ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",
-                 EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
+                 MY_SECRET_SSID, MY_SECRET_PASS);
     } else {
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }
@@ -181,6 +177,9 @@ void wifi_init_sta(void)
 
 void app_main(void)
 {
+    gettimeofday (&app_start, NULL);
+    printf ("%d.%06d started at %ld.%06ld\n", 0, 0, app_start.tv_sec, app_start.tv_usec );
+
     float temperature = 0;
     const int wakeup_time_sec = 300;
     printf("Enabling timer wakeup, %ds\n", wakeup_time_sec);
@@ -294,8 +293,6 @@ void app_main(void)
     }
     owb_uninitialize(owb);
 
-    fflush(stdout);
-
     //Send MQTT
     char message[7];
     char topic[50];
@@ -307,7 +304,22 @@ void app_main(void)
     
     ESP_ERROR_CHECK(esp_wifi_stop());
 
-    printf("Entering deep sleep\n");
+    struct timeval tv;
+
+    gettimeofday (&tv, NULL);
+    tv.tv_sec  -= app_start.tv_sec;
+    tv.tv_usec -= app_start.tv_usec;
+    if (tv.tv_usec < 0) {
+	    tv.tv_usec += 1000000;
+	    --tv.tv_sec;
+    }
+	
+    printf("Entering deep sleep after %ld.%06ld seconds\n", tv.tv_sec, tv.tv_usec);
+
+	// Allow prints to finish
+    fflush(stdout);
+    // Flush any data left in UART FIFOs
+    uart_tx_wait_idle(CONFIG_CONSOLE_UART_NUM);
 
     esp_deep_sleep_start();
 }
