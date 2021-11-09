@@ -105,6 +105,11 @@ void wifi_init_sta(void)
     ip4addr_aton("192.168.100.1", &ip_info.gw);
 */
 
+/*
+    ip4addr_aton("192.168.100.210", &ip_info.ip);
+    ip4addr_aton("255.255.255.0", &ip_info.netmask);
+    ip4addr_aton("192.168.100.1", &ip_info.gw);
+*/
     esp_netif_set_ip_info(my_sta, &ip_info);
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -138,6 +143,7 @@ void wifi_init_sta(void)
     };
 	// Need cleaning
 /*
+	// Need cleaning
     if(rtcValid){
         memcpy(wifi_config.sta.bssid, bssid, sizeof(bssid));
         wifi_config.sta.channel = channel;
@@ -175,6 +181,9 @@ void wifi_init_sta(void)
         ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",
                  MY_SECRET_SSID, MY_SECRET_PASS);
 //        crc32 = 0;
+    } else if (bits & WIFI_FAIL_BIT) {
+        ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",
+                 MY_SECRET_SSID, MY_SECRET_PASS);
     } else {
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }
@@ -330,7 +339,7 @@ void app_main(void)
 	
     printf("Entering deep sleep after %ld.%06ld seconds\n", tv.tv_sec, tv.tv_usec);
 
-	// Allow prints to finish
+    // Allow prints to finish
     fflush(stdout);
 
     esp_deep_sleep_start();
