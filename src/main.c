@@ -102,6 +102,11 @@ void wifi_init_sta(void)
     esp_netif_str_to_ip4(MY_SECRET_STATIC_MASK, &ip_info.netmask);
     esp_netif_str_to_ip4(MY_SECRET_STATIC_GW, &ip_info.gw);
 
+/*
+    ip4addr_aton("192.168.100.210", &ip_info.ip);
+    ip4addr_aton("255.255.255.0", &ip_info.netmask);
+    ip4addr_aton("192.168.100.1", &ip_info.gw);
+*/
     esp_netif_set_ip_info(my_sta, &ip_info);
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -133,8 +138,8 @@ void wifi_init_sta(void)
         },
     };
     // Need cleaning
-    /*
-    if(rtcValid){
+*
+   if(rtcValid){
         memcpy(wifi_config.sta.bssid, bssid, sizeof(bssid));
         wifi_config.sta.channel = channel;
 		wifi_config.sta.bssid_set = 1;
