@@ -1,7 +1,5 @@
-// MQTT.h
-
-#ifndef MQTT_H
-#define MQTT_H
+//MQTT.h
+//MQTT functions
 
 #include <stdio.h>
 #include <stdint.h>
@@ -33,7 +31,8 @@ esp_mqtt_client_handle_t client;
 
 static void log_error_if_nonzero(const char *message, int error_code)
 {
-    if (error_code != 0) {
+    if (error_code != 0)
+    {
         ESP_LOGE(TAG, "Last error %s: 0x%x", message, error_code);
     }
 }
@@ -55,7 +54,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     esp_mqtt_event_handle_t event = event_data;
     esp_mqtt_client_handle_t client = event->client;
     int msg_id;
-    switch ((esp_mqtt_event_id_t)event_id) {
+    switch ((esp_mqtt_event_id_t)event_id)
+    {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
         break;
@@ -80,10 +80,11 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
-        if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+        if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT)
+        {
             log_error_if_nonzero("reported from esp-tls", event->error_handle->esp_tls_last_esp_err);
             log_error_if_nonzero("reported from tls stack", event->error_handle->esp_tls_stack_err);
-            log_error_if_nonzero("captured as transport's socket errno",  event->error_handle->esp_transport_sock_errno);
+            log_error_if_nonzero("captured as transport's socket errno", event->error_handle->esp_transport_sock_errno);
             ESP_LOGI(TAG, "Last errno string (%s)", strerror(event->error_handle->esp_transport_sock_errno));
         }
         break;
@@ -107,10 +108,9 @@ void start_MQTT()
 
     esp_mqtt_client_config_t mqtt_cfg = {
         .uri = MY_SECRET_BROKER_URL,
-//        .username = MY_SECRET_MQTT_USERNAME,
-//        .password = MY_SECRET_MQTT_PASSWORD,
-        .client_id = MY_SECRET_MQTT_CLIENT_ID
-    };
+        //        .username = MY_SECRET_MQTT_USERNAME,
+        //        .password = MY_SECRET_MQTT_PASSWORD,
+        .client_id = MY_SECRET_MQTT_CLIENT_ID};
 
     client = esp_mqtt_client_init(&mqtt_cfg);
     /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler */
@@ -123,7 +123,7 @@ void send_MQTT(const char *topic, const char *message)
     message_sent = false;
     int retries = 0;
     esp_mqtt_client_publish(client, topic, message, 0, 1, 1);
-    while(!message_sent && retries < 20)
+    while (!message_sent && retries < 20)
     {
         vTaskDelay(100 / portTICK_PERIOD_MS);
         retries++;
@@ -135,5 +135,3 @@ void end_MQTT()
 {
     esp_mqtt_client_destroy(client);
 }
-
-#endif //MQTT_H
