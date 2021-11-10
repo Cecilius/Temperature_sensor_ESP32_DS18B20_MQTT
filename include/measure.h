@@ -19,8 +19,6 @@ bool ready_flag = false;
 void vTaskMeasure(void *param)
 {
 
-    int variable = 0;
-
     for (;;)
     {
         // Create a 1-Wire bus, using the RMT timeslot driver
