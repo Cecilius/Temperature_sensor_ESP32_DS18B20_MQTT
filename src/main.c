@@ -11,6 +11,7 @@
 #include "nvs_flash.h"
 #include "esp_sleep.h"
 #include "esp_rom_crc.h"
+#include <driver/adc.h>
 
 #include "lwip/err.h"
 #include "lwip/sys.h"
@@ -80,9 +81,9 @@ void wifi_init_sta(void)
     // WiFi Persistent
     esp_wifi_set_storage(WIFI_STORAGE_RAM);
 
+    /*
     // validate WiFi settings from RTC memory
     bool rtcValid = false;
-    /*
     // Calculate the CRC of bssid from RTC memory
     uint32_t crc = esp_rom_crc32_le( 0, ((uint8_t*)&bssid), sizeof( bssid ) );
     if( crc == crc32 ) {
@@ -200,6 +201,14 @@ void app_main(void)
     printf("Enabling timer wakeup, %ds\n", wakeup_time_sec);
     esp_sleep_enable_timer_wakeup(wakeup_time_sec * 1000000);
 
+    //configure ADC and get reading from battery
+    adc1_config_width(ADC_WIDTH_BIT_12);
+    adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_0);
+    // Reading divided by full range times referent voltage * voltage divider
+    int raw_adc = adc1_get_raw(ADC1_CHANNEL_0);
+    printf("Raw ADC = %d\n", raw_adc);
+    float battery = (float)raw_adc / 4096 * 1.1 / 22 * (22 + 68);
+
     //Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
@@ -222,6 +231,9 @@ void app_main(void)
     //Send MQTT
     char message[7];
     char topic[50];
+    sprintf(message, "%.2f", battery);
+    sprintf(topic, "%s/%s/battery/state", HA_UNIQ_ID, HA_COMPONENT);
+    send_MQTT(topic, message);
     sprintf(message, "%.1f", temperature);
     sprintf(topic, "%s/%s/%s/state", HA_UNIQ_ID, HA_COMPONENT, HA_SENSOR);
     if (esp_reset_reason() != ESP_RST_DEEPSLEEP)
@@ -229,7 +241,10 @@ void app_main(void)
         char conf_topic[80];
         char conf_message[400];
         sprintf(conf_topic, "homeassistant/%s/%s/%s/config", HA_COMPONENT, HA_UNIQ_ID, HA_SENSOR);
-        sprintf(conf_message, "{\"dev_cla\":\"%s\",\"unit_of_meas\":\"%s\",\"stat_cla\":\"%s\",\"name\":\"%s\",\"stat_t\":\"%s\",\"uniq_id\":\"%s\",\"dev\":{\"ids\":\"%s\",\"name\":\"%s\",\"sw\":\"%s\"}}", HA_SENSOR, HA_UNIT_OF_MEAS, HA_STAT_CLA, HA_NAME, topic, HA_UNIQ_ID, HA_DEV_ID, HA_DEV_NAME, HA_DEV_SW);
+        sprintf(conf_message, "{\"dev_cla\":\"%s\",\"unit_of_meas\":\"%s\",\"stat_cla\":\"%s\",\"name\":\"%s\",\"stat_t\":\"%s\",\"uniq_id\":\"%s-%s\",\"dev\":{\"ids\":\"%s\",\"name\":\"%s\",\"sw\":\"%s\"}}", HA_SENSOR, HA_UNIT_OF_MEAS, HA_STAT_CLA, HA_NAME, topic, HA_UNIQ_ID, HA_SENSOR, HA_DEV_ID, HA_DEV_NAME, HA_DEV_SW);
+        send_MQTT(conf_topic, conf_message);
+        sprintf(conf_topic, "homeassistant/%s/%s/battery/config", HA_COMPONENT, HA_UNIQ_ID);
+        sprintf(conf_message, "{\"dev_cla\":\"voltage\",\"unit_of_meas\":\"V\",\"stat_cla\":\"measurement\",\"name\":\"Battery level\",\"stat_t\":\"%s/%s/battery/state\",\"uniq_id\":\"%s-battery\",\"dev\":{\"ids\":\"%s\",\"name\":\"%s\",\"sw\":\"%s\"}}", HA_UNIQ_ID, HA_COMPONENT, HA_UNIQ_ID, HA_DEV_ID, HA_DEV_NAME, HA_DEV_SW);
         send_MQTT(conf_topic, conf_message);
     }
 
