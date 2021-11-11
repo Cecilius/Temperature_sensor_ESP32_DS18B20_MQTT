@@ -12,6 +12,7 @@
 #include "esp_sleep.h"
 #include "esp_rom_crc.h"
 #include <driver/adc.h>
+#include "driver/rtc_io.h"
 
 #include "lwip/err.h"
 #include "lwip/sys.h"
@@ -23,7 +24,7 @@ static const char *TAG = "wifi + ds18b20";
 #include "measure.h"
 
 // How many times will try to connect WiFi
-#define CONECTION_RETRY 5
+#define CONECTION_RETRY 2
 
 static struct timeval app_start;
 
@@ -36,13 +37,9 @@ static EventGroupHandle_t s_wifi_event_group;
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT BIT1
 
-/*
-RTC_DATA_ATTR uint32_t crc32;
-RTC_DATA_ATTR uint8_t channel;
-RTC_DATA_ATTR uint8_t bssid[6];
-*/
-
 static int s_retry_num = 0;
+
+void enter_deep_sleep();
 
 static void event_handler(void *arg, esp_event_base_t event_base,
                           int32_t event_id, void *event_data)
@@ -81,16 +78,6 @@ void wifi_init_sta(void)
     // WiFi Persistent
     esp_wifi_set_storage(WIFI_STORAGE_RAM);
 
-    /*
-    // validate WiFi settings from RTC memory
-    bool rtcValid = false;
-    // Calculate the CRC of bssid from RTC memory
-    uint32_t crc = esp_rom_crc32_le( 0, ((uint8_t*)&bssid), sizeof( bssid ) );
-    if( crc == crc32 ) {
-        rtcValid = true;
-        printf("RTC data are valid, using them to fast connect. BSSID-%x:%x:%x:%x:%x:%x, channel: %d\n", bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], channel);
-    }
-*/
     ESP_ERROR_CHECK(esp_netif_init());
 
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -103,11 +90,6 @@ void wifi_init_sta(void)
     esp_netif_str_to_ip4(MY_SECRET_STATIC_MASK, &ip_info.netmask);
     esp_netif_str_to_ip4(MY_SECRET_STATIC_GW, &ip_info.gw);
 
-/*
-    ip4addr_aton("192.168.100.210", &ip_info.ip);
-    ip4addr_aton("255.255.255.0", &ip_info.netmask);
-    ip4addr_aton("192.168.100.1", &ip_info.gw);
-*/
     esp_netif_set_ip_info(my_sta, &ip_info);
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -138,15 +120,7 @@ void wifi_init_sta(void)
                 .required = false},
         },
     };
-    // Need cleaning
-*
-   if(rtcValid){
-        memcpy(wifi_config.sta.bssid, bssid, sizeof(bssid));
-        wifi_config.sta.channel = channel;
-		wifi_config.sta.bssid_set = 1;
-		wifi_config.sta.scan_method = WIFI_FAST_SCAN;
-    }
-*/
+
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
@@ -167,19 +141,12 @@ void wifi_init_sta(void)
     {
         ESP_LOGI(TAG, "connected to ap SSID:%s password:%s",
                  MY_SECRET_SSID, MY_SECRET_PASS);
-        /*
-        if(!rtcValid){
-            memcpy(bssid, wifi_config.sta.bssid, sizeof(wifi_config.sta.bssid));
-            channel = wifi_config.sta.channel;
-            crc32 = esp_rom_crc32_le( 0, bssid, sizeof( bssid ) );
-        }
-*/
     }
     else if (bits & WIFI_FAIL_BIT)
     {
         ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",
                  MY_SECRET_SSID, MY_SECRET_PASS);
-        // crc32 = 0;
+        enter_deep_sleep();
     }
     else
     {
@@ -255,12 +222,16 @@ void app_main(void)
         vTaskDelay(100 / portTICK_PERIOD_MS);
         wait++;
     }
-    printf("Waited %d00 ms to get measurement.", wait);
 
     send_MQTT(topic, message);
 
     end_MQTT();
 
+    enter_deep_sleep();
+}
+
+void enter_deep_sleep()
+{
     printf("Turning off WiFi\n");
 
     ESP_ERROR_CHECK(esp_wifi_stop());
@@ -277,9 +248,14 @@ void app_main(void)
     }
 
     printf("Entering deep sleep after %ld.%06ld seconds\n", tv.tv_sec, tv.tv_usec);
-
     // Allow prints to finish
     fflush(stdout);
 
+    // Isolate GPIO2 (RTC GPIO 12) to reduce power consumption during deep sleep - external pullup.
+    rtc_gpio_isolate(GPIO_NUM_12);
+
+    // Disable ROM logging (should disable UART)
+    esp_deep_sleep_disable_rom_logging();
+	
     esp_deep_sleep_start();
 }

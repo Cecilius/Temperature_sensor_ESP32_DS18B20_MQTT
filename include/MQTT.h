@@ -128,7 +128,6 @@ void send_MQTT(const char *topic, const char *message)
         vTaskDelay(100 / portTICK_PERIOD_MS);
         retries++;
     }
-    printf("retries = %d \n", retries);
 }
 
 void end_MQTT()
