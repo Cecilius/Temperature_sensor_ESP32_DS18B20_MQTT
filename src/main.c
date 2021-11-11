@@ -281,5 +281,8 @@ void app_main(void)
     // Allow prints to finish
     fflush(stdout);
 
+    // Isolate GPIO2 (RTC GPIO 12) to reduce power consumption during deep sleep - external pullup.
+    rtc_gpio_isolate(GPIO_NUM_12);
+
     esp_deep_sleep_start();
 }
