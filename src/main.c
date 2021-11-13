@@ -162,10 +162,13 @@ void wifi_init_sta(void)
 void app_main(void)
 {
     gettimeofday(&app_start, NULL);
-    printf("%d.%06d started at %ld.%06ld\n", 0, 0, app_start.tv_sec, app_start.tv_usec);
+    ESP_LOGW(TAG, "%d.%06d started at %ld.%06ld\n", 0, 0, app_start.tv_sec, app_start.tv_usec);
+
+    // Create task to measure
+    xTaskCreate(vTaskMeasure, "DS18B20", 1024 * 4, NULL, 3, NULL);
 
     const int wakeup_time_sec = 300;
-    printf("Enabling timer wakeup, %ds\n", wakeup_time_sec);
+    ESP_LOGI(TAG, "Enabling timer wakeup, %ds\n", wakeup_time_sec);
     esp_sleep_enable_timer_wakeup(wakeup_time_sec * 1000000);
 
     //configure ADC and get reading from battery
@@ -173,7 +176,7 @@ void app_main(void)
     adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_0);
     // Reading divided by full range times referent voltage * voltage divider
     int raw_adc = adc1_get_raw(ADC1_CHANNEL_0);
-    printf("Raw ADC = %d\n", raw_adc);
+    ESP_LOGD(TAG, "Raw ADC = %d\n", raw_adc);
     float battery = (float)raw_adc / 4096 * 1.1 / 22 * (22 + 68);
 
     //Initialize NVS
@@ -186,9 +189,6 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
-
-    // Create task to measure
-    xTaskCreate(vTaskMeasure, "DS18B20", 1024 * 4, NULL, 3, NULL);
 
     // Turn on WiFi
     wifi_init_sta();
@@ -232,7 +232,7 @@ void app_main(void)
 
 void enter_deep_sleep()
 {
-    printf("Turning off WiFi\n");
+    ESP_LOGW(TAG, "Turning off WiFi\n");
 
     ESP_ERROR_CHECK(esp_wifi_stop());
 
@@ -247,7 +247,7 @@ void enter_deep_sleep()
         --tv.tv_sec;
     }
 
-    printf("Entering deep sleep after %ld.%06ld seconds\n", tv.tv_sec, tv.tv_usec);
+    ESP_LOGW(TAG, "Entering deep sleep after %ld.%06ld seconds\n\n", tv.tv_sec, tv.tv_usec);
     // Allow prints to finish
     fflush(stdout);
 
@@ -256,6 +256,6 @@ void enter_deep_sleep()
 
     // Disable ROM logging (should disable UART)
     esp_deep_sleep_disable_rom_logging();
-	
+
     esp_deep_sleep_start();
 }

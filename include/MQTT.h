@@ -75,8 +75,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         break;
     case MQTT_EVENT_DATA:
         ESP_LOGI(TAG, "MQTT_EVENT_DATA");
-        printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
-        printf("DATA=%.*s\r\n", event->data_len, event->data);
+        ESP_LOGI(TAG, "TOPIC=%.*s\r\n", event->topic_len, event->topic);
+        ESP_LOGI(TAG, "DATA=%.*s\r\n", event->data_len, event->data);
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
@@ -96,15 +96,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
 void start_MQTT()
 {
-    ESP_LOGI(TAG, "[MQTT] Startup..");
-
-    esp_log_level_set("*", ESP_LOG_INFO);
-    esp_log_level_set("MQTT_CLIENT", ESP_LOG_VERBOSE);
-    esp_log_level_set("MQTT_EXAMPLE", ESP_LOG_VERBOSE);
-    esp_log_level_set("TRANSPORT_BASE", ESP_LOG_VERBOSE);
-    esp_log_level_set("esp-tls", ESP_LOG_VERBOSE);
-    esp_log_level_set("TRANSPORT", ESP_LOG_VERBOSE);
-    esp_log_level_set("OUTBOX", ESP_LOG_VERBOSE);
+    ESP_LOGW(TAG, "[MQTT] Startup..");
 
     esp_mqtt_client_config_t mqtt_cfg = {
         .uri = MY_SECRET_BROKER_URL,
@@ -132,5 +124,6 @@ void send_MQTT(const char *topic, const char *message)
 
 void end_MQTT()
 {
+    ESP_LOGW(TAG, "[MQTT] Closing..");
     esp_mqtt_client_destroy(client);
 }
