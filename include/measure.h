@@ -28,7 +28,7 @@ void vTaskMeasure(void *param)
         owb_use_crc(owb, true); // enable CRC check for ROM code
 
         // Find all connected devices
-        printf("Find devices:\n");
+        ESP_LOGD("Find devices:\n");
         OneWireBus_ROMCode device_rom_codes[MAX_DEVICES] = {0};
         int num_devices = 0;
         OneWireBus_SearchState search_state = {0};
@@ -38,12 +38,12 @@ void vTaskMeasure(void *param)
         {
             char rom_code_s[17];
             owb_string_from_rom_code(search_state.rom_code, rom_code_s, sizeof(rom_code_s));
-            printf("  %d : %s\n", num_devices, rom_code_s);
+            ESP_LOGD("  %d : %s\n", num_devices, rom_code_s);
             device_rom_codes[num_devices] = search_state.rom_code;
             ++num_devices;
             owb_search_next(owb, &search_state, &found);
         }
-        printf("Found %d device%s\n", num_devices, num_devices == 1 ? "" : "s");
+        ESP_LOGI("Found %d device%s\n", num_devices, num_devices == 1 ? "" : "s");
 
         // Create DS18B20 devices on the 1-Wire bus
         DS18B20_Info *devices[MAX_DEVICES] = {0};
@@ -54,7 +54,7 @@ void vTaskMeasure(void *param)
 
             if (num_devices == 1)
             {
-                printf("Single device optimisations enabled\n");
+                ESP_LOGI("Single device optimisations enabled\n");
                 ds18b20_init_solo(ds18b20_info, owb); // only one device on bus
             }
             else
@@ -89,7 +89,7 @@ void vTaskMeasure(void *param)
                 }
 
                 // Print results in a separate loop, after all have been read
-                printf("\nTemperature readings (degrees C): sample %d\n", ++sample_count);
+                ESP_LOGI("\nTemperature readings (degrees C): sample %d\n", ++sample_count);
                 for (int i = 0; i < num_devices; ++i)
                 {
                     if (errors[i] != DS18B20_OK)
@@ -97,7 +97,7 @@ void vTaskMeasure(void *param)
                         ++errors_count[i];
                     }
 
-                    printf("  %d: %.1f    %d errors\n", i, readings[i], errors_count[i]);
+                    ESP_LOGW("  %d: %.1f    %d errors\n", i, readings[i], errors_count[i]);
                 }
                 temperature = readings[0];
                 ready_flag = true;
@@ -107,7 +107,7 @@ void vTaskMeasure(void *param)
         }
         else
         {
-            printf("\nNo DS18B20 devices detected!\n");
+            ESP_LOGE("\nNo DS18B20 devices detected!\n");
         }
 
         // clean up dynamically allocated data
