@@ -18,6 +18,8 @@
 #include "lwip/sys.h"
 
 static const char *TAG = "wifi + ds18b20";
+xSemaphoreHandle meas_done;
+
 #include "secrets.h"
 #include "ha_config.h"
 #include "MQTT.h"
@@ -39,7 +41,101 @@ static EventGroupHandle_t s_wifi_event_group;
 
 static int s_retry_num = 0;
 
+float battery;
+
+void init();
+
+void battery_measurement();
+
+static void event_handler(void *arg, esp_event_base_t event_base,
+                          int32_t event_id, void *event_data);
+
+void wifi_init_sta(void);
+
 void enter_deep_sleep();
+
+void app_main(void)
+{
+    meas_done = xSemaphoreCreateBinary();
+
+    init();
+
+    // Turn on WiFi
+    wifi_init_sta();
+
+    start_MQTT();
+
+    //Send MQTT
+    char message[7];
+    char topic[50];
+    sprintf(message, "%.2f", battery);
+    sprintf(topic, "%s/%s/battery/state", HA_UNIQ_ID, HA_COMPONENT);
+    send_MQTT(topic, message);
+    //If is it first start announce configuration to home assistant
+    if (esp_reset_reason() != ESP_RST_DEEPSLEEP)
+    {
+        char conf_topic[80];
+        char conf_message[400];
+        sprintf(conf_topic, "homeassistant/%s/%s/%s/config", HA_COMPONENT, HA_UNIQ_ID, HA_SENSOR);
+        sprintf(conf_message, "{\"dev_cla\":\"%s\",\"unit_of_meas\":\"%s\",\"stat_cla\":\"%s\",\"name\":\"%s\",\"stat_t\":\"%s/%s/%s/state\",\"uniq_id\":\"%s-%s\",\"dev\":{\"ids\":\"%s\",\"name\":\"%s\",\"sw\":\"%s\"}}", HA_SENSOR, HA_UNIT_OF_MEAS, HA_STAT_CLA, HA_NAME, HA_UNIQ_ID, HA_COMPONENT, HA_SENSOR, HA_UNIQ_ID, HA_SENSOR, HA_DEV_ID, HA_DEV_NAME, HA_DEV_SW);
+        send_MQTT(conf_topic, conf_message);
+        sprintf(conf_topic, "homeassistant/%s/%s/battery/config", HA_COMPONENT, HA_UNIQ_ID);
+        sprintf(conf_message, "{\"dev_cla\":\"voltage\",\"unit_of_meas\":\"V\",\"stat_cla\":\"measurement\",\"name\":\"Battery level\",\"stat_t\":\"%s/%s/battery/state\",\"uniq_id\":\"%s-battery\",\"dev\":{\"ids\":\"%s\",\"name\":\"%s\",\"sw\":\"%s\"}}", HA_UNIQ_ID, HA_COMPONENT, HA_UNIQ_ID, HA_DEV_ID, HA_DEV_NAME, HA_DEV_SW);
+        send_MQTT(conf_topic, conf_message);
+    }
+
+    if (xSemaphoreTake(meas_done, 2000 / portTICK_PERIOD_MS))
+    {
+        ESP_LOGW(TAG, "Measurements ready! Sending MQTT.");
+        sprintf(topic, "%s/%s/%s/state", HA_UNIQ_ID, HA_COMPONENT, HA_SENSOR);
+        sprintf(message, "%.1f", temperature);
+
+        send_MQTT(topic, message);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "Measurements were not done in 2 seconds, going to sleep!");
+    }
+
+    end_MQTT();
+
+    enter_deep_sleep();
+}
+
+void init()
+{
+    gettimeofday(&app_start, NULL);
+    ESP_LOGI(TAG, "%d.%06d started at %ld.%06ld\n", 0, 0, app_start.tv_sec, app_start.tv_usec);
+
+    // Create task to measure
+    xTaskCreate(vTaskMeasure, "DS18B20", 1024 * 4, NULL, 3, NULL);
+
+    const int wakeup_time_sec = 300;
+    ESP_LOGI(TAG, "Enabling timer wakeup, %ds\n", wakeup_time_sec);
+    esp_sleep_enable_timer_wakeup(wakeup_time_sec * 1000000);
+
+    battery_measurement();
+
+    //Initialize NVS
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+}
+
+void battery_measurement()
+{
+    //configure ADC and get reading from battery
+    adc1_config_width(ADC_WIDTH_BIT_12);
+    adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_0);
+    // Reading divided by full range times referent voltage * voltage divider
+    int raw_adc = adc1_get_raw(ADC1_CHANNEL_0);
+    ESP_LOGD(TAG, "Raw ADC = %d\n", raw_adc);
+    battery = (float)raw_adc / 4096 * 1.1 / 22 * (22 + 68);
+}
 
 static void event_handler(void *arg, esp_event_base_t event_base,
                           int32_t event_id, void *event_data)
@@ -159,77 +255,6 @@ void wifi_init_sta(void)
     vEventGroupDelete(s_wifi_event_group);
 }
 
-void app_main(void)
-{
-    gettimeofday(&app_start, NULL);
-    ESP_LOGW(TAG, "%d.%06d started at %ld.%06ld\n", 0, 0, app_start.tv_sec, app_start.tv_usec);
-
-    // Create task to measure
-    xTaskCreate(vTaskMeasure, "DS18B20", 1024 * 4, NULL, 3, NULL);
-
-    const int wakeup_time_sec = 300;
-    ESP_LOGI(TAG, "Enabling timer wakeup, %ds\n", wakeup_time_sec);
-    esp_sleep_enable_timer_wakeup(wakeup_time_sec * 1000000);
-
-    //configure ADC and get reading from battery
-    adc1_config_width(ADC_WIDTH_BIT_12);
-    adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_0);
-    // Reading divided by full range times referent voltage * voltage divider
-    int raw_adc = adc1_get_raw(ADC1_CHANNEL_0);
-    ESP_LOGD(TAG, "Raw ADC = %d\n", raw_adc);
-    float battery = (float)raw_adc / 4096 * 1.1 / 22 * (22 + 68);
-
-    //Initialize NVS
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
-    {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(ret);
-
-    ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
-
-    // Turn on WiFi
-    wifi_init_sta();
-
-    start_MQTT();
-
-    //Send MQTT
-    char message[7];
-    char topic[50];
-    sprintf(message, "%.2f", battery);
-    sprintf(topic, "%s/%s/battery/state", HA_UNIQ_ID, HA_COMPONENT);
-    send_MQTT(topic, message);
-    sprintf(message, "%.1f", temperature);
-    sprintf(topic, "%s/%s/%s/state", HA_UNIQ_ID, HA_COMPONENT, HA_SENSOR);
-    if (esp_reset_reason() != ESP_RST_DEEPSLEEP)
-    {
-        char conf_topic[80];
-        char conf_message[400];
-        sprintf(conf_topic, "homeassistant/%s/%s/%s/config", HA_COMPONENT, HA_UNIQ_ID, HA_SENSOR);
-        sprintf(conf_message, "{\"dev_cla\":\"%s\",\"unit_of_meas\":\"%s\",\"stat_cla\":\"%s\",\"name\":\"%s\",\"stat_t\":\"%s\",\"uniq_id\":\"%s-%s\",\"dev\":{\"ids\":\"%s\",\"name\":\"%s\",\"sw\":\"%s\"}}", HA_SENSOR, HA_UNIT_OF_MEAS, HA_STAT_CLA, HA_NAME, topic, HA_UNIQ_ID, HA_SENSOR, HA_DEV_ID, HA_DEV_NAME, HA_DEV_SW);
-        send_MQTT(conf_topic, conf_message);
-        sprintf(conf_topic, "homeassistant/%s/%s/battery/config", HA_COMPONENT, HA_UNIQ_ID);
-        sprintf(conf_message, "{\"dev_cla\":\"voltage\",\"unit_of_meas\":\"V\",\"stat_cla\":\"measurement\",\"name\":\"Battery level\",\"stat_t\":\"%s/%s/battery/state\",\"uniq_id\":\"%s-battery\",\"dev\":{\"ids\":\"%s\",\"name\":\"%s\",\"sw\":\"%s\"}}", HA_UNIQ_ID, HA_COMPONENT, HA_UNIQ_ID, HA_DEV_ID, HA_DEV_NAME, HA_DEV_SW);
-        send_MQTT(conf_topic, conf_message);
-    }
-
-    // wait till we have result of measurement (In case it'll be too slow)
-    int wait = 0;
-    while (!ready_flag && wait < 20)
-    {
-        vTaskDelay(100 / portTICK_PERIOD_MS);
-        wait++;
-    }
-
-    send_MQTT(topic, message);
-
-    end_MQTT();
-
-    enter_deep_sleep();
-}
-
 void enter_deep_sleep()
 {
     ESP_LOGW(TAG, "Turning off WiFi\n");
@@ -247,7 +272,7 @@ void enter_deep_sleep()
         --tv.tv_sec;
     }
 
-    ESP_LOGW(TAG, "Entering deep sleep after %ld.%06ld seconds\n\n", tv.tv_sec, tv.tv_usec);
+    ESP_LOGW(TAG, "Entering deep sleep after %ld.%06ld seconds\n", tv.tv_sec, tv.tv_usec);
     // Allow prints to finish
     fflush(stdout);
 

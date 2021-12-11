@@ -100,7 +100,7 @@ void vTaskMeasure(void *param)
                     ESP_LOGW(TAG, "  %d: %.1f    %d errors", i, readings[i], errors_count[i]);
                 }
                 temperature = readings[0];
-                ready_flag = true;
+                xSemaphoreGive(meas_done);
 
                 // vTaskDelayUntil(&last_wake_time, SAMPLE_PERIOD / portTICK_PERIOD_MS);
             }
